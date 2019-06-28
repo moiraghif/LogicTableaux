@@ -195,7 +195,7 @@ class If(FBF):
                     return [{fbf1}, {fbf2}], [False, False]
                 elif fbf1.char == ET_CHAR:
                     fbf = If(fbf1.args[0],
-                              If(fbf1.args[1], fbf2),
+                             If(fbf1.args[1], fbf2),
                              sign="T")
                     return [{fbf}], [False]
                 elif fbf1.char == OR_CHAR:
