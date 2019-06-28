@@ -202,11 +202,11 @@ class If(FBF):
                     fbf1_new = If(fbf1.args[0], fbf2, sign="T")
                     fbf2_new = If(fbf1.args[1], fbf2, sign="T")
                     return [{fbf1_new, fbf2_new}], [False]
-                # elif fbf1.char == IF_CHAR:
-                #     fbf1.sign = "T"
-                #     fbf_new = If(fbf1.args[1], fbf2, sign="F")
-                #     fbf2.sign = "T"
-                #     return [{fbf1, fbf_new}, {fbf2}], [False, False]
+                elif fbf1.char == IF_CHAR:
+                    fbf1_new = If(fbf1.args[0], fbf2, sign="T")
+                    fbf2_new = If(fbf1.args[1], fbf2, sign="F")
+                    fbf2.sign = "T"
+                    return [{fbf1_new, fbf2_new}, {fbf2}], [False, False]
                 else:
                     fbf1.sign = "F"
                     fbf2.sign = "T"
