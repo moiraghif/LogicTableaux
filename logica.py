@@ -86,8 +86,13 @@ class FBF:
             return self.args
 
     def get_param(self):
-        "Get all parameteres of a formula"
+        "Get assigned parameteres of a formula"
         return get_all(map(lambda f: f.get_param(),
+                           self.args))
+
+    def get_all_param(self):
+        "Get all parameters of a formula"
+        return get_all(map(lambda f: f.get_all_param(),
                            self.args))
 
     def __eq__(self, other):
@@ -113,8 +118,13 @@ class Atom(FBF):
         self.sign = sign
         self.char = ""
 
+    def get_all_param(self):
+        "Get all parameters"
+        param = re.search(r"(?<=\()\w+(?=\))", self.args)
+        return param.group() if param else []
+
     def get_param(self):
-        "If it is a relationship, return the parameter"
+        "Return the parameter if assigned"
         param = re.search(r"(?<=\()p\d+(?=\))", self.args)
         if not param:
             return None
@@ -151,29 +161,19 @@ class Et(FBF):
         # just check a tableaux table
         fbf1, fbf2 = self.args
         if solver == "CL":
+            fbf1.sign = self.sign
+            fbf2.sign = self.sign
             if self.sign == "T":
-                fbf1.sign = "T"
-                fbf2.sign = "T"
                 return [{fbf1, fbf2}], [False]
             elif self.sign == "F":
-                fbf1.sign = "F"
-                fbf2.sign = "F"
                 return [{fbf1}, {fbf2}], [False, False]
         elif solver == "INT":
+            fbf1.sign = self.sign
+            fbf2.sign = self.sign
             if self.sign == "T":
-                fbf1.sign = "T"
-                fbf2.sign = "T"
                 return [{fbf1, fbf2}], [False]
-            elif self.sign == "F":
-                fbf1.sign = "F"
-                fbf2.sign = "F"
+            elif self.sign in {"F", "Fc"}:
                 return [{fbf1}, {fbf2}], [False, False]
-            elif self.sign == "Fc":
-                fbf1.sign = "Fc"
-                fbf2.sign = "Fc"
-                return [{fbf1}, {fbf2}], [False, False]
-            else:
-                return [{self}], False
         return [{self}], [False]
 
 
@@ -198,29 +198,19 @@ class Or(FBF):
     def solve(self, solver, params):
         fbf1, fbf2 = self.args
         if solver == "CL":
+            fbf1.sign = self.sign
+            fbf2.sign = self.sign
             if self.sign == "T":
-                fbf1.sign = "T"
-                fbf2.sign = "T"
                 return [{fbf1}, {fbf2}], [False, False]
             elif self.sign == "F":
-                fbf1.sign = "F"
-                fbf2.sign = "F"
                 return [{fbf1, fbf2}], [False]
         elif solver == "INT":
+            fbf1.sign = self.sign
+            fbf2.sign = self.sign
             if self.sign == "T":
-                fbf1.sign = "T"
-                fbf2.sign = "T"
                 return [{fbf1}, {fbf2}], [False, False]
-            elif self.sign == "F":
-                fbf1.sign = "F"
-                fbf2.sign = "F"
+            elif self.sign in {"F", "Fc"}:
                 return [{fbf1, fbf2}], [False]
-            elif self.sign == "Fc":
-                fbf1.sign = "Fc"
-                fbf2.sign = "Fc"
-                return [{fbf1, fbf2}], [False]
-            else:
-                return [{self}], False
         return [{self}], [False]
 
 
@@ -277,8 +267,8 @@ class If(FBF):
                     fbf1.char = "F"
                     fbf2.char = "T"
                     return [{fbf1, self}, {fbf2}], [False, False]
-                elif fbf1.char == ET_CHAR:
-                    fbf_new = If(All(fbf1.args[0]), self.args[1])
+                elif fbf1.char == EXISTS_CHAR:
+                    fbf_new = If(All(fbf1.args[0]), self.args[1], sign="T")
                     return [{fbf_new}], [False]
                 else:
                     fbf1.sign = "F"
@@ -292,8 +282,6 @@ class If(FBF):
                 fbf1.sign = "T"
                 fbf2.sign = "Fc"
                 return [{fbf1, fbf2}], [True]
-            else:
-                return [{self}], [False]
         return [{self}], [False]
 
 
@@ -321,11 +309,9 @@ class Not(FBF):
             if self.sign == "T":
                 fbf.sign = "Fc"
                 return [{fbf}], [False]
-            elif self.sign == "F" or self.sign == "Fc":
+            elif self.sign in {"F", "Fc"}:
                 fbf.sign = "T"
                 return [{fbf}], [True]
-            else:
-                return [{self}], [False]
         return [{self}], [False]
 
 
@@ -399,19 +385,22 @@ class Exists(FBF):
 
 
 class Tableaux:
-    def __init__(self, solver, S, old_S=list()):
+    def __init__(self, solver, S, old_S=list(), max_p=0, first_run=False):
         self.solver = solver
-        if len(S) == 1 and not S[0].sign:
+        if first_run:
             S[0].sign = "F"
         self.S = set(S)
         # to check if the recoursive algorithm enters in a loop
         self.old_S = old_S
+        self.max_p = max_p if max_p else len(S[0].get_all_param())
         self.params = set(get_all(map(lambda f: f.get_param(),
                                       self.S)))
         if solver == "CL":
             certain = {"T", "F"}
         elif solver == "INT":
             certain = {"T", "Fc"}
+        else:
+            raise Exception("Not a valid logic")
         self.Sc = set(filter(lambda f: f.sign in certain,
                              self.S))
 
@@ -427,8 +416,8 @@ class Tableaux:
         return all([Tableaux(self.solver,
                              list(((self.Sc if c[i] else
                                     self.S) - {fbf}) | s[i]),
-                             old_S=self.old_S +
-                             [self.S]).solve()
+                             old_S=self.old_S + [self.S],
+                             max_p=self.max_p).solve()
                     for i in range(len(s))])
 
     def solve(self):
@@ -438,19 +427,23 @@ class Tableaux:
         # get all formulas which a rule can be applied to
         not_atomic = set(filter(lambda f: f.char, self.S))
         # if any, the tableaux is open
-        if self.S in self.old_S or not not_atomic:
+        if self.S in self.old_S or \
+           not not_atomic or \
+           (self.params and len(self.params) > self.max_p):
             return False
         # check if exists a sequence of formulas that closed the tableaux
         # with an exploratory algorithm: it checks all possible sequences
-        try:
-            return any(map(self.expand_solution, not_atomic))
-        except RecursionError:
-            return False
+        return any(map(self.expand_solution, not_atomic))
 
 
 def is_theorem(formula, logic):
     "Check if a formula is a theorem in a logic"
-    return Tableaux(logic, [formula]).solve()
+    try:
+        return Tableaux(logic, [formula], first_run=True).solve()
+    except RecursionError:
+        print("Error, cannot say neither if it is valid nor " +
+              "not valid in {} logic".format(logic))
+        return None
 
 
 def solve(formula, logic=["CL", "INT"]):
@@ -458,6 +451,7 @@ def solve(formula, logic=["CL", "INT"]):
     txt = str(formula)
     results = {l: is_theorem(formula, l)
                for l in logic}
+    print(txt)
     for l, r in results.items():
         print(l + " "*(5 - len(l)) + (THEOREM_CHAR if r
                                       else NOT_THEOREM_CHAR) + "  " + txt)
@@ -471,29 +465,45 @@ if __name__ == "__main__":
     solve(Not(Not(Or("A", Not("A")))))
     solve(Et("A", Not("A")))
     solve(Not(Et("A", Not("A"))))
-    solve(If(
-        Et(
-            Or("P", "Q"),
-            If("P", "R"),
-            Et(
-                Not("P"),
-                If("Q", "R"))),
-        "R"))
+    solve(If(Et(Or("P", "Q"),
+                If("P", "R"),
+                Et(Not("P"),
+                   If("Q", "R"))),
+             "R"))
     solve(If(Or("A", Not("A")),
              "B", Not(Not("B"))))
     solve(If("A", Not(Not("A"))))
     solve(If(Not(Not("A")), "A"))
     solve(If(Not(Not((Not("A")))), Not("A")))
-    solve(If(All("A(x)"), Not(Exists(Not("A(x)")))))
-    solve(If(Not(Exists(Not("A(x)"))), All("A(x)")))
-    solve(If(All(If("A", "B(x)")), If("A", All("B(x)"))))
-    solve(If(If("A", All("B(x)")), All(If("A", "B(x)"))))
-    solve(If(Exists(If("A(x)", "B(x)")), If(All("A(x)"), Exists("B(x)"))))
-    print("(Intuizionistic tableaux causes a stack overflow)")
-    solve(If(If(All("A(x)"), Exists("B(x)")), Exists(If("A(x)", "B(x)"))),
-          logic=["CL"])
+
+    # first order
+    # solve(If(All(Or("A(x)",
+    #                 "B(x)")),
+    #          Or(All("A(x)"),
+    #             All("B(x)"))))
+    solve(If(All("A(x)"),
+             Not(Exists(Not("A(x)")))))
+    solve(If(Not(Exists(Not("A(x)"))),
+             All("A(x)")))
+    solve(If(All(If("A", "B(x)")),
+             If("A",
+                All("B(x)"))))
+    solve(If(If("A",
+                All("B(x)")),
+             All(If("A",
+                    "B(x)"))))
+    solve(If(Exists(If("A(x)",
+                       "B(x)")),
+             If(All("A(x)"),
+                Exists("B(x)"))))
+    solve(If(If(All("A(x)"),
+                Exists("B(x)")),
+             Exists(If("A(x)",
+                       "B(x)"))))
     solve(All(Or("A(x)", Not("A(x)"))))
-    print("(Intuizionistic tableaux causes a stack overflow)")
-    solve(Not(Not(All(Or("A(x)", Not("A(x)"))))), logic=["CL"])
-    solve(Exists(Or("A(x)", Not("A(x)"))))
-    solve(Not(Not(Exists(Or("A(x)", Not("A(x)"))))))
+    solve(Not(Not(All(Or("A(x)",
+                         Not("A(x)"))))))
+    solve(Exists(Or("A(x)",
+                    Not("A(x)"))))
+    solve(Not(Not(Exists(Or("A(x)",
+                            Not("A(x)"))))))
