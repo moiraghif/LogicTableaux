@@ -1,4 +1,5 @@
 import re
+import datetime
 
 
 ET_CHAR = "∧"
@@ -33,6 +34,10 @@ def p_new(params):
         return "p1"
     return "p" + str(max(map(lambda p: int(re.search(r"(?<=p)\d+", p).group()),
                              params)) + 1)
+
+
+def max_p(params):
+    return max([int(re.search(r"\d+", p).group()) for p in params])
 
 
 class FBF:
@@ -164,17 +169,20 @@ class Et(FBF):
             fbf1.sign = self.sign
             fbf2.sign = self.sign
             if self.sign == "T":
-                return [{fbf1, fbf2}], [False]
+                yield {fbf1, fbf2}, False
             elif self.sign == "F":
-                return [{fbf1}, {fbf2}], [False, False]
+                yield {fbf1}, False
+                yield {fbf2}, False
         elif solver == "INT":
             fbf1.sign = self.sign
             fbf2.sign = self.sign
             if self.sign == "T":
-                return [{fbf1, fbf2}], [False]
+                yield {fbf1, fbf2}, False
             elif self.sign in {"F", "Fc"}:
-                return [{fbf1}, {fbf2}], [False, False]
-        return [{self}], [False]
+                yield {fbf1}, False
+                yield {fbf2}, False
+        else:
+            yield {self}, False
 
 
 class Or(FBF):
@@ -201,17 +209,20 @@ class Or(FBF):
             fbf1.sign = self.sign
             fbf2.sign = self.sign
             if self.sign == "T":
-                return [{fbf1}, {fbf2}], [False, False]
+                yield {fbf1}, False
+                yield {fbf2}, False
             elif self.sign == "F":
-                return [{fbf1, fbf2}], [False]
+                yield {fbf1, fbf2}, False
         elif solver == "INT":
             fbf1.sign = self.sign
             fbf2.sign = self.sign
             if self.sign == "T":
-                return [{fbf1}, {fbf2}], [False, False]
+                yield {fbf1}, False
+                yield {fbf2}, False
             elif self.sign in {"F", "Fc"}:
-                return [{fbf1, fbf2}], [False]
-        return [{self}], [False]
+                yield {fbf1, fbf2}, False
+        else:
+            yield {self}, False
 
 
 class If(FBF):
@@ -238,51 +249,57 @@ class If(FBF):
             if self.sign == "T":
                 fbf1.sign = "F"
                 fbf2.sign = "T"
-                return [{fbf1}, {fbf2}], [False, False]
+                yield {fbf1}, False
+                yield {fbf2}, False
             else:
                 fbf1.sign = "T"
                 fbf2.sign = "F"
-                return [{fbf1, fbf2}], [False]
-        if solver == "INT":
+                yield {fbf1, fbf2}, False
+        elif solver == "INT":
             if self.sign == "T":
                 if not fbf1.char:
                     fbf1.sign = "F"
                     fbf2.sign = "T"
-                    return [{fbf1}, {fbf2}], [False, False]
+                    yield {fbf1}, False
+                    yield {fbf2}, False
                 elif fbf1.char == ET_CHAR:
                     fbf = If(fbf1.args[0],
                              If(fbf1.args[1], fbf2),
                              sign="T")
-                    return [{fbf}], [False]
+                    yield {fbf}, False
                 elif fbf1.char == OR_CHAR:
                     fbf1_new = If(fbf1.args[0], fbf2, sign="T")
                     fbf2_new = If(fbf1.args[1], fbf2, sign="T")
-                    return [{fbf1_new, fbf2_new}], [False]
+                    yield {fbf1_new, fbf2_new}, False
                 elif fbf1.char == IF_CHAR:
                     fbf1_new = If(fbf1.args[0], fbf2, sign="T")
                     fbf2_new = If(fbf1.args[1], fbf2, sign="F")
                     fbf2.sign = "T"
-                    return [{fbf1_new, fbf2_new}, {fbf2}], [False, False]
+                    yield {fbf1_new, fbf2_new}, False
+                    yield {fbf2}, False
                 elif fbf1.char == ALL_CHAR:
                     fbf1.char = "F"
                     fbf2.char = "T"
-                    return [{fbf1, self}, {fbf2}], [False, False]
+                    yield {fbf1, self}, False
+                    yield {fbf2}, False
                 elif fbf1.char == EXISTS_CHAR:
                     fbf_new = If(All(fbf1.args[0]), self.args[1], sign="T")
-                    return [{fbf_new}], [False]
+                    yield {fbf_new}, False
                 else:
                     fbf1.sign = "F"
                     fbf2.sign = "T"
-                    return [{self, fbf1}, {fbf2}], [False, False]
+                    yield {fbf1, self}, False
+                    yield {fbf2}, False
             elif self.sign == "F":
                 fbf1.sign = "T"
                 fbf2.sign = "F"
-                return [{fbf1, fbf2}], [True]
+                yield {fbf1, fbf2}, True
             elif self.sign == "Fc":
                 fbf1.sign = "T"
                 fbf2.sign = "Fc"
-                return [{fbf1, fbf2}], [True]
-        return [{self}], [False]
+                yield {fbf1, fbf2}, True
+        else:
+            yield {self}, False
 
 
 class Not(FBF):
@@ -304,15 +321,16 @@ class Not(FBF):
         fbf = self.args[0]
         if solver == "CL":
             fbf.sign = "F" if self.sign == "T" else "T"
-            return [{fbf}], [False]
+            yield {fbf}, False
         elif solver == "INT":
             if self.sign == "T":
                 fbf.sign = "Fc"
-                return [{fbf}], [False]
+                yield {fbf}, False
             elif self.sign in {"F", "Fc"}:
                 fbf.sign = "T"
-                return [{fbf}], [True]
-        return [{self}], [False]
+                yield {fbf}, True
+        else:
+            yield {self}, False
 
 
 class All(FBF):
@@ -332,22 +350,23 @@ class All(FBF):
         if solver == "CL":
             fbf.sign = self.sign
             if self.sign == "T":
-                return [{fbf.set_param(p), self} for p in params], \
-                    [False for p in params]
+                for p in params:
+                    yield {fbf.set_param(p), self}, False
             elif self.sign == "F":
-                return [{fbf.set_param(p_new(params))}], [False]
+                yield {fbf.set_param(p_new(params))}, False
         elif solver == "INT":
             if self.sign == "T":
                 fbf.sign = self.sign
-                return [{fbf.set_param(p), self} for p in params], \
-                    [False for p in params]
+                for p in params:
+                    yield {fbf.set_param(p), self}, False
             elif self.sign == "F":
                 fbf.sign = "F"
-                return [{fbf.set_param(p_new(params))}], [True]
+                yield {fbf.set_param(p_new(params))}, True
             elif self.sign == "Fc":
                 fbf.sign = "F"
-                return [{fbf.set_param(p_new(params)), self}], [True]
-        return [{self}], [False]
+                yield {fbf.set_param(p_new(params)), self}, True
+        else:
+            yield {self}, False
 
 
 class Exists(FBF):
@@ -367,21 +386,22 @@ class Exists(FBF):
         if solver == "CL":
             fbf.sign = self.sign
             if self.sign == "T":
-                return [{fbf.set_param(p_new(params))}], [False]
+                yield {fbf.set_param(p_new(params))}, False
             elif self.sign == "F":
-                return [{fbf.set_param(p)} for p in params], \
-                    [False for p in params]
+                for p in params:
+                    yield {fbf.set_param(p)}, False
         elif solver == "INT":
             fbf.sign = self.sign
             if self.sign == "T":
-                return [{fbf.set_param(p_new(params))}], [False]
+                yield {fbf.set_param(p_new(params))}, False
             elif self.sign == "F":
-                return [{fbf.set_param(p)} for p in params], \
-                    [False for p in params]
+                for p in params:
+                    yield {fbf.set_param(p)}, False
             elif self.sign == "Fc":
-                return [{fbf.set_param(p), self} for p in params], \
-                    [False for p in params]
-        return [{self}], [False]
+                for p in params:
+                    yield {fbf.set_param(p), self}, False
+        else:
+            yield {self}, False
 
 
 class Tableaux:
@@ -403,22 +423,28 @@ class Tableaux:
             raise Exception("Not a valid logic")
         self.Sc = set(filter(lambda f: f.sign in certain,
                              self.S))
+        # print(self.solver + "  -  " + ", ".join(list(map(str, self.S))))
 
     def is_closed(self):
-        for fbf in self.S:
-            if any(map(lambda f: fbf.closed(f), self.S - {fbf})):
-                return True
-        return False
+        return any([any(map(lambda f: fbf.closed(f), self.S - {fbf}))
+                    for fbf in self.S])
 
     def expand_solution(self, fbf):
-        s, c = fbf.solve(self.solver, self.params)
         # if a sequence is correct, this is the solution
-        return all([Tableaux(self.solver,
-                             list(((self.Sc if c[i] else
-                                    self.S) - {fbf}) | s[i]),
+        sol = fbf.solve(self.solver, self.params)
+        if fbf.char in {ALL_CHAR, EXISTS_CHAR}:
+            return any((Tableaux(self.solver,
+                                 list(((self.Sc if c else
+                                        self.S) - {fbf}) | s),
+                                 old_S=self.old_S + [self.S],
+                                 max_p=self.max_p).solve()
+                        for s, c in sol))
+        return all((Tableaux(self.solver,
+                             list(((self.Sc if c else
+                                    self.S) - {fbf}) | s),
                              old_S=self.old_S + [self.S],
                              max_p=self.max_p).solve()
-                    for i in range(len(s))])
+                    for s, c in sol))
 
     def solve(self):
         # check if the tableaux is closed
@@ -429,32 +455,31 @@ class Tableaux:
         # if any, the tableaux is open
         if self.S in self.old_S or \
            not not_atomic or \
-           (self.params and len(self.params) > self.max_p):
+           (self.params and max_p(self.params) > self.max_p):
             return False
         # check if exists a sequence of formulas that closed the tableaux
         # with an exploratory algorithm: it checks all possible sequences
-        return any(map(self.expand_solution, not_atomic))
+        return any((self.expand_solution(f) for f in not_atomic))
 
 
 def is_theorem(formula, logic):
     "Check if a formula is a theorem in a logic"
-    try:
-        return Tableaux(logic, [formula], first_run=True).solve()
-    except RecursionError:
-        print("Error, cannot say neither if it is valid nor " +
-              "not valid in {} logic".format(logic))
-        return None
+    return Tableaux(logic, [formula], first_run=True).solve()
 
 
 def solve(formula, logic=["CL", "INT"]):
     "Solve the formula the result"
     txt = str(formula)
-    results = {l: is_theorem(formula, l)
-               for l in logic}
     print(txt)
-    for l, r in results.items():
-        print(l + " "*(5 - len(l)) + (THEOREM_CHAR if r
+    results = dict()
+    for l in logic:
+        start = datetime.datetime.now()
+        t = is_theorem(formula, l)
+        time = datetime.datetime.now() - start
+        print(time, end=" "*3)
+        print(l + " "*(5 - len(l)) + (THEOREM_CHAR if t
                                       else NOT_THEOREM_CHAR) + "  " + txt)
+        results[l] = t
     print("")
     return results
 
@@ -481,6 +506,10 @@ if __name__ == "__main__":
     #                 "B(x)")),
     #          Or(All("A(x)"),
     #             All("B(x)"))))
+    solve(Not(If(All(Or("A(x)",
+                        "B(x)")),
+                 Or(All("A(x)"),
+                    All("B(x)")))))
     solve(If(All("A(x)"),
              Not(Exists(Not("A(x)")))))
     solve(If(Not(Exists(Not("A(x)"))),
