@@ -1,9 +1,38 @@
+import re
+
+
 ET_CHAR = "∧"
 OR_CHAR = "∨"
 IF_CHAR = "→"
 NOT_CHAR = "¬"
+
+# First order Logic
+ALL_CHAR = "∀"
+EXISTS_CHAR = "∃"
+
+# Modal Logic
+NECESSARY_CHAR = "◻"
+POSSIBLE_CHAR = "◇"
+
+# Results
 THEOREM_CHAR = "⊢"
 NOT_THEOREM_CHAR = "⊬"
+
+
+def get_all(l):
+    "Returns all elements in nested lists"
+    o = list()
+    for i in l:
+        if i:
+            o += get_all(i) if isinstance(i, list) else [i]
+    return o
+
+
+def p_new(params):
+    if not params:
+        return "p1"
+    return "p" + str(max(map(lambda p: int(re.search(r"(?<=p)\d+", p).group()),
+                             params)) + 1)
 
 
 class FBF:
@@ -56,6 +85,11 @@ class FBF:
         else:
             return self.args
 
+    def get_param(self):
+        "Get all parameteres of a formula"
+        return get_all(map(lambda f: f.get_param(),
+                           self.args))
+
     def __eq__(self, other):
         # Two formulas are equal only when variables and function are the same
         return self.args == other.args and self.char == other.char
@@ -73,11 +107,25 @@ class FBF:
 
 
 class Atom(FBF):
-    def __init__(self, value):
+    def __init__(self, value, sign=None):
         "The atomic element"
         self.args = value
+        self.sign = sign
         self.char = ""
-        self.sign = ""
+
+    def get_param(self):
+        "If it is a relationship, return the parameter"
+        param = re.search(r"(?<=\()p\d+(?=\))", self.args)
+        if not param:
+            return None
+        return param.group() if len(param.group()) > 1 else None
+
+    def set_param(self, val):
+        "Set the parameter for first order rules"
+        return Atom(re.sub(r"(?<=\()\w+(?=\))",
+                           val,
+                           self.args),
+                    sign=self.sign)
 
 
 class Et(FBF):
@@ -93,18 +141,24 @@ class Et(FBF):
         elif len(self.args) > 2:
             self = self.__init__(Et(*args[0:2]), *args[2:])
 
-    def solve(self, solver):
+    def set_param(self, param):
+        "Set all parameters of a formula"
+        return Et(self.args[0].set_param(param),
+                  self.args[1].set_param(param),
+                  sign=self.sign)
+
+    def solve(self, solver, params):
         # just check a tableaux table
         fbf1, fbf2 = self.args
         if solver == "CL":
             if self.sign == "T":
                 fbf1.sign = "T"
                 fbf2.sign = "T"
-                return [{fbf1, fbf2}]
+                return [{fbf1, fbf2}], [False]
             elif self.sign == "F":
                 fbf1.sign = "F"
                 fbf2.sign = "F"
-                return [{fbf1}, {fbf2}]
+                return [{fbf1}, {fbf2}], [False, False]
         elif solver == "INT":
             if self.sign == "T":
                 fbf1.sign = "T"
@@ -120,7 +174,7 @@ class Et(FBF):
                 return [{fbf1}, {fbf2}], [False, False]
             else:
                 return [{self}], False
-        return [{self}]
+        return [{self}], [False]
 
 
 class Or(FBF):
@@ -135,17 +189,23 @@ class Or(FBF):
         elif len(self.args) > 2:
             self = self.__init__(Or(*args[0:2]), *args[2:])
 
-    def solve(self, solver):
+    def set_param(self, param):
+        "Set all parameters of a formula"
+        return Or(self.args[0].set_param(param),
+                  self.args[1].set_param(param),
+                  sign=self.sign)
+
+    def solve(self, solver, params):
         fbf1, fbf2 = self.args
         if solver == "CL":
             if self.sign == "T":
                 fbf1.sign = "T"
                 fbf2.sign = "T"
-                return [{fbf1}, {fbf2}]
+                return [{fbf1}, {fbf2}], [False, False]
             elif self.sign == "F":
                 fbf1.sign = "F"
                 fbf2.sign = "F"
-                return [{fbf1, fbf2}]
+                return [{fbf1, fbf2}], [False]
         elif solver == "INT":
             if self.sign == "T":
                 fbf1.sign = "T"
@@ -161,7 +221,7 @@ class Or(FBF):
                 return [{fbf1, fbf2}], [False]
             else:
                 return [{self}], False
-        return [{self}]
+        return [{self}], [False]
 
 
 class If(FBF):
@@ -176,17 +236,23 @@ class If(FBF):
         elif len(self.args) > 2:
             self = self.__init__(If(*args[0:2]), *args[2:])
 
-    def solve(self, solver):
+    def set_param(self, param):
+        "Set all parameters of a formula"
+        return If(self.args[0].set_param(param),
+                  self.args[1].set_param(param),
+                  sign=self.sign)
+
+    def solve(self, solver, params):
         fbf1, fbf2 = self.args
         if solver == "CL":
             if self.sign == "T":
                 fbf1.sign = "F"
                 fbf2.sign = "T"
-                return [{fbf1}, {fbf2}]
+                return [{fbf1}, {fbf2}], [False, False]
             else:
                 fbf1.sign = "T"
                 fbf2.sign = "F"
-                return [{fbf1, fbf2}]
+                return [{fbf1, fbf2}], [False]
         if solver == "INT":
             if self.sign == "T":
                 if not fbf1.char:
@@ -207,6 +273,13 @@ class If(FBF):
                     fbf2_new = If(fbf1.args[1], fbf2, sign="F")
                     fbf2.sign = "T"
                     return [{fbf1_new, fbf2_new}, {fbf2}], [False, False]
+                elif fbf1.char == ALL_CHAR:
+                    fbf1.char = "F"
+                    fbf2.char = "T"
+                    return [{fbf1, self}, {fbf2}], [False, False]
+                elif fbf1.char == ET_CHAR:
+                    fbf_new = If(All(fbf1.args[0]), self.args[1])
+                    return [{fbf_new}], [False]
                 else:
                     fbf1.sign = "F"
                     fbf2.sign = "T"
@@ -221,7 +294,7 @@ class If(FBF):
                 return [{fbf1, fbf2}], [True]
             else:
                 return [{self}], [False]
-        return [{self}]
+        return [{self}], [False]
 
 
 class Not(FBF):
@@ -234,11 +307,16 @@ class Not(FBF):
         if len(self.args) != 1:
             raise Exception("Object is not a valid formula")
 
-    def solve(self, solver):
+    def set_param(self, param):
+        "Set all parameters of a formula"
+        return Not(self.args[0].set_param(param),
+                   sign=self.sign)
+
+    def solve(self, solver, params):
         fbf = self.args[0]
         if solver == "CL":
             fbf.sign = "F" if self.sign == "T" else "T"
-            return [{fbf}]
+            return [{fbf}], [False]
         elif solver == "INT":
             if self.sign == "T":
                 fbf.sign = "Fc"
@@ -248,15 +326,94 @@ class Not(FBF):
                 return [{fbf}], [True]
             else:
                 return [{self}], [False]
-        return [{self}]
+        return [{self}], [False]
+
+
+class All(FBF):
+    def __init__(self, *args, sign=None):
+        "The logical quantifier all operator"
+        self.char = ALL_CHAR
+        self.sign = sign
+        self.args = list(map(lambda a: Atom(a) if isinstance(a, str) else a,
+                             args))
+        if len(self.args) != 1:
+            raise Exception("Object is not a valid formula")
+
+    def solve(self, solver, params):
+        fbf = self.args[0]
+        if not params:
+            params = {"p1"}
+        if solver == "CL":
+            fbf.sign = self.sign
+            if self.sign == "T":
+                return [{fbf.set_param(p), self} for p in params], \
+                    [False for p in params]
+            elif self.sign == "F":
+                return [{fbf.set_param(p_new(params))}], [False]
+        elif solver == "INT":
+            if self.sign == "T":
+                fbf.sign = self.sign
+                return [{fbf.set_param(p), self} for p in params], \
+                    [False for p in params]
+            elif self.sign == "F":
+                fbf.sign = "F"
+                return [{fbf.set_param(p_new(params))}], [True]
+            elif self.sign == "Fc":
+                fbf.sign = "F"
+                return [{fbf.set_param(p_new(params)), self}], [True]
+        return [{self}], [False]
+
+
+class Exists(FBF):
+    def __init__(self, *args, sign=None):
+        "The logical existential all operator"
+        self.char = EXISTS_CHAR
+        self.sign = sign
+        self.args = list(map(lambda a: Atom(a) if isinstance(a, str) else a,
+                             args))
+        if len(self.args) != 1:
+            raise Exception("Object is not a valid formula")
+
+    def solve(self, solver, params):
+        fbf = self.args[0]
+        if not params:
+            params = {"p1"}
+        if solver == "CL":
+            fbf.sign = self.sign
+            if self.sign == "T":
+                return [{fbf.set_param(p_new(params))}], [False]
+            elif self.sign == "F":
+                return [{fbf.set_param(p)} for p in params], \
+                    [False for p in params]
+        elif solver == "INT":
+            fbf.sign = self.sign
+            if self.sign == "T":
+                return [{fbf.set_param(p_new(params))}], [False]
+            elif self.sign == "F":
+                return [{fbf.set_param(p)} for p in params], \
+                    [False for p in params]
+            elif self.sign == "Fc":
+                return [{fbf.set_param(p), self} for p in params], \
+                    [False for p in params]
+        return [{self}], [False]
 
 
 class Tableaux:
-    def __init__(self, S, solver):
+    def __init__(self, solver, S, old_S=list()):
         self.solver = solver
         if len(S) == 1 and not S[0].sign:
             S[0].sign = "F"
         self.S = set(S)
+        # to check if the recoursive algorithm enters in a loop
+        self.old_S = old_S
+        self.params = set(get_all(map(lambda f: f.get_param(),
+                                      self.S)))
+        if solver == "CL":
+            certain = {"T", "F"}
+        elif solver == "INT":
+            certain = {"T", "Fc"}
+        self.Sc = set(filter(lambda f: f.sign in certain,
+                             self.S))
 
     def is_closed(self):
         for fbf in self.S:
@@ -264,74 +421,19 @@ class Tableaux:
                 return True
         return False
 
+    def expand_solution(self, fbf):
+        s, c = fbf.solve(self.solver, self.params)
+        # if a sequence is correct, this is the solution
+        return all([Tableaux(self.solver,
+                             list(((self.Sc if c[i] else
+                                    self.S) - {fbf}) | s[i]),
+                             old_S=self.old_S +
+                             [self.S]).solve()
+                    for i in range(len(s))])
 
-class TableauxCL(Tableaux):
-    def __init__(self, S):
-        super().__init__(S, "CL")
-
-    def apply_formula_to(self):
-        "Get the most convenient formula to apply the rule"
-        # those are rules that split the tableaux:
-        # there are not convenient
-        splits = {"T" + OR_CHAR,
-                  "T" + IF_CHAR,
-                  "F" + ET_CHAR}
-        not_atomic = set(filter(lambda f: f.char, self.S))
-        if not not_atomic:
-            return None
-        # get all not atomic formulas that do not split the tableaux
-        not_split_rules = set(filter(lambda f: f.sign + f.char not in splits,
-                                     not_atomic))
-        # if any, get one randomly, else get one randomly
-        s = not_split_rules.pop() if not_split_rules else not_atomic.pop()
-        # and remove it from S
-        self.S -= {s}
-        return s
-
-    def solve(self, verbose=False):
-        if verbose:
-            print(", ".join([str(fbf) for fbf in self.S]))
+    def solve(self):
         # check if the tableaux is closed
         if self.is_closed():
-            if verbose:
-                print(" closed " + "-"*11)
-            return True
-        # if not, get a formula to apply the rule
-        fbf = self.apply_formula_to()
-        # if there are no formula, the tableaux can not be closed
-        if not fbf:
-            if verbose:
-                print(" not closed " + "-"*7)
-            return False
-        if verbose:
-            print(" {}{} ".format(fbf.sign, fbf.char) + "-"*15)
-        s = fbf.solve(self.solver)
-        # add the solution to S
-        if len(s) == 1:
-            self.S |= s[0]
-        else:
-            # if it splits the tableaux, both branches must be closed
-            return all([TableauxCL(list(self.S | t)).solve(verbose=verbose)
-                        for t in s])
-        # repeat recoursively until the solution
-        return self.solve(verbose=verbose)
-
-
-class TableauxINT(Tableaux):
-    def __init__(self, S, old_S=list()):
-        super().__init__(S, "INT")
-        # get all certain formula
-        self.Sc = set(filter(lambda f: f.sign in {"T", "Fc"},
-                             self.S))
-        # to check if the recoursive algorithm enters in a loop
-        self.old_S = old_S
-
-    def solve(self, verbose=False):
-        # check if the tableaux is closed
-        if self.is_closed():
-            if verbose:
-                print(" closed " + "-"*11)
-                print(", ".join([str(s) for s in self.S]))
             return True
         # get all formulas which a rule can be applied to
         not_atomic = set(filter(lambda f: f.char, self.S))
@@ -340,39 +442,21 @@ class TableauxINT(Tableaux):
             return False
         # check if exists a sequence of formulas that closed the tableaux
         # with an exploratory algorithm: it checks all possible sequences
-        for fbf in not_atomic:
-            fbf = fbf
-            s, c = fbf.solve(self.solver)
-            # if a sequence is correct, this is the solution
-            if all([TableauxINT(list(((self.Sc if c[i] else
-                                       self.S) - {fbf}) | s[i]),
-                                old_S=self.old_S +
-                                [self.S]).solve(
-                                    verbose=verbose)
-                    for i in range(len(s))]):
-                if verbose:
-                    print(" {}{} ".format(fbf.sign, fbf.char) +
-                          "-"*(16 - len(fbf.sign)))
-                    print(", ".join([str(s) for s in self.S]))
-                return True
-        # if all combinations are tested, the tableaux is open
-        return False
+        try:
+            return any(map(self.expand_solution, not_atomic))
+        except RecursionError:
+            return False
 
 
-def is_theorem(formula, logic, verbose=False):
+def is_theorem(formula, logic):
     "Check if a formula is a theorem in a logic"
-    if logic == "CL":
-        return TableauxCL([formula]).solve(verbose)
-    elif logic == "INT":
-        return TableauxINT([formula]).solve(verbose)
-    else:
-        return None
+    return Tableaux(logic, [formula]).solve()
 
 
-def solve(formula, verbose=False, logic=["CL", "INT"]):
+def solve(formula, logic=["CL", "INT"]):
     "Solve the formula the result"
     txt = str(formula)
-    results = {l: is_theorem(formula, l, verbose)
+    results = {l: is_theorem(formula, l)
                for l in logic}
     for l, r in results.items():
         print(l + " "*(5 - len(l)) + (THEOREM_CHAR if r
@@ -400,3 +484,16 @@ if __name__ == "__main__":
     solve(If("A", Not(Not("A"))))
     solve(If(Not(Not("A")), "A"))
     solve(If(Not(Not((Not("A")))), Not("A")))
+    solve(If(All("A(x)"), Not(Exists(Not("A(x)")))))
+    solve(If(Not(Exists(Not("A(x)"))), All("A(x)")))
+    solve(If(All(If("A", "B(x)")), If("A", All("B(x)"))))
+    solve(If(If("A", All("B(x)")), All(If("A", "B(x)"))))
+    solve(If(Exists(If("A(x)", "B(x)")), If(All("A(x)"), Exists("B(x)"))))
+    print("(Intuizionistic tableaux causes a stack overflow)")
+    solve(If(If(All("A(x)"), Exists("B(x)")), Exists(If("A(x)", "B(x)"))),
+          logic=["CL"])
+    solve(All(Or("A(x)", Not("A(x)"))))
+    print("(Intuizionistic tableaux causes a stack overflow)")
+    solve(Not(Not(All(Or("A(x)", Not("A(x)"))))), logic=["CL"])
+    solve(Exists(Or("A(x)", Not("A(x)"))))
+    solve(Not(Not(Exists(Or("A(x)", Not("A(x)"))))))
